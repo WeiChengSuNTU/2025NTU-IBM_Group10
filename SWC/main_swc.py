@@ -37,6 +37,7 @@ def deep_Q_Learning(alpha, gamma, epsilon, episodes, max_steps, n_tests, render 
 	@param n_tests number of test episodes
 	"""
 
+
     seed = 42
 
 	env_name = "FrozenLake-v1"
