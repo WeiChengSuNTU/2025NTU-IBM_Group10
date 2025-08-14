@@ -169,13 +169,18 @@ def circuit_qiskit(weights, angles=None):
     return np.array(expvals)
 
 
-def variational_classifier(var_Q_circuit, var_Q_bias, angles=None):
+def variational_classifier(var_Q_circuit, var_Q_bias, angles=None, n_runs=1):
     """The variational classifier."""
-    raw_output = torch.tensor(
-        circuit_qiskit(var_Q_circuit.detach().numpy(), angles=angles)
-    )
-    raw_output = raw_output + var_Q_bias
-    return raw_output
+    outputs = []
+    for _ in range(n_runs):
+        raw_output = torch.tensor(
+            circuit_qiskit(var_Q_circuit.detach().numpy(), angles=angles)
+        )
+        outputs.append(raw_output)
+
+    avg_output = torch.stack(outputs, dim=0).mean(dim=0)
+    avg_output = avg_output + var_Q_bias
+    return avg_output
 
 ########################################################################################################################
 
@@ -191,7 +196,7 @@ def square_loss(labels, predictions):
     loss = 0
     for l, p in zip(labels, predictions):
         loss = loss + (l - p) ** 2
-    loss = loss / len(labels)
+    loss = loss / 2
     #print("LOSS")
     #print(loss)
 
@@ -316,8 +321,11 @@ def deep_Q_Learning(alpha, gamma, epsilon, episodes, max_steps, n_tests, render=
             done = bool(terminated or truncated)
             s_ = int(s_)  # ensure it is an int
 
-            if done and reward == 0:
-                reward -= 0.2
+            if done:
+                if reward == 0:
+                    reward -= 0.2
+                else:
+                    reward += 1.0
             else:
                 if s == s_:
                     reward -= 0.1
@@ -370,7 +378,7 @@ def deep_Q_Learning(alpha, gamma, epsilon, episodes, max_steps, n_tests, render=
                     if rendered is not None:
                         print(rendered)
                 # decay epsilon
-                epsilon = epsilon / ((episode / 100) + 1)
+                epsilon -= (1 / episodes)
                 print(f"This episode took {t} timesteps and reward: {total_reward}")
                 timestep_reward.append(total_reward)
                 iter_index.append(episode)
