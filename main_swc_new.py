@@ -5,6 +5,7 @@ from qiskit.visualization import plot_histogram
 from qiskit_machine_learning.connectors import TorchConnector
 
 import time
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -18,7 +19,11 @@ num_steps = 100
 
 seed = 42
 env_name = "FrozenLake-v1"
-env = gym.make(env_name, render_mode="ansi", is_slippery=False)
+#env = gym.make(env_name, render_mode="ansi", is_slippery=False)
+env = gym.make(env_name, render_mode="human", is_slippery=False)
+
+state_space_size = env.observation_space.n  # FrozenLake 是 16
+n_qubits = math.ceil(math.log2(state_space_size))  # → 4 qubits
 
 gemma = 0.99
 
@@ -36,8 +41,22 @@ qc = QuantumCircuit(n_qubits)
 
 #================ state trans =================================
 # decimal -> binary
-def dec_to_bin(state, n):
-    return format(state, f'0{n}b')
+# def dec_to_bin(state, n):
+    # if isinstance(state, torch.Tensor):
+        # if state.dim() > 0 and state.numel() > 1:
+            # state = int(torch.argmax(state).item())  # one-hot → index
+        # else:
+            # state = int(state.item())  # scalar tensor
+    # return format(state, f'0{n}b')
+
+def dec_to_bin(state, n_qubits):
+    if isinstance(state, torch.Tensor):
+        if state.numel() > 1:
+            state = int(torch.argmax(state).item())  # one-hot → index
+        else:
+            state = int(state.item())
+    return format(state, f'0{n_qubits}b')
+
 
 #================ create qc ===================================
 # encoding
@@ -97,10 +116,13 @@ class VQC(nn.Module):
         self.num_weights = n_qubits * n_layers * 2
         self.weights = nn.Parameter(torch.randn(n_qubits * n_layers * 2))  # 2 parameters per qubit
         self.sparse = False
+        self.num_inputs = n_qubits
 
     def forward(self, x):
         q_out = Q_value_list(x, self.weights.detach().numpy(), shots=1024)
-        return torch.tensor(q_out, dtype=torch.float32)
+        # return torch.tensor(q_out, dtype=torch.float32)
+        return q_out.clone().detach().float()
+
 
 
 # initialize the replay buffer
@@ -151,15 +173,19 @@ def adjusted_reward(reward, done):
 
 
 def deep_Q_Learning():
-    epsilon = 0.99
+    #epsilon = 0.99
+    epsilon = 1.0
+    epsilon_min = 0.01
+    epsilon_decay = 0.995
+
     buffer_capacity = 32
     buffer = ReplayBuffer(capacity=80)
     vqc = VQC(n_qubits, n_layers)  # Initialize the quantum circuit model
-    quantum_model_torch = TorchConnector(vqc)  # 將量子電路模型連接到 PyTorch
+    quantum_model_torch = vqc  # 將量子電路模型連接到 PyTorch
     optimizer = torch.optim.Adam(quantum_model_torch.parameters(), lr=0.001)  # 使用 Adam 優化器
 
     env.reset(seed=seed)
-    for episode in range(num_episodes):
+    for episode in range(1, num_episodes + 1):
         state, info = env.reset(seed=seed)
         done = False
 
@@ -171,10 +197,29 @@ def deep_Q_Learning():
             sample_number = np_random.random()
             if sample_number < epsilon:
                 action = env.action_space.sample()  # 隨機選擇行動
+                print(f"[Exploration] ε={epsilon:.3f}, action={action}")
             else:
                 # 使用量子電路計算 Q 值
-                q_values = quantum_model_torch(state)  # 確保這裡計算 q_values
+                # state_tensor = torch.nn.functional.one_hot(
+                    # torch.tensor(state), num_classes=state_space_size
+                # ).float()
+                # q_values = quantum_model_torch(state_tensor)  # 確保這裡計算 q_values
+                state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+
+                if not done:
+                    q_values = q_network(state_tensor)
+                    print("q_values shape:", q_values.shape)
+                    print("actions:", actions)
+                    q_values_selected = torch.gather(q_values, 1, torch.tensor([[actions]]))
+                else:
+                    q_values_selected = torch.tensor([[0.0]])  # 或者直接跳過這步
+
                 action = int(torch.argmax(q_values))  # 選擇 Q 值最大的行動
+                print(f"[Exploitation] ε={epsilon:.3f}, action={action}")
+                
+                print("q_values shape:", q_values.shape)
+                print("actions:", actions)
+
 
             next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
@@ -218,7 +263,9 @@ def deep_Q_Learning():
 
 
         # 更新 epsilon
-        epsilon = epsilon / (100 / episode + 1)
+        #epsilon = epsilon / (100 / episode + 1)
+        epsilon = max(epsilon_min, epsilon * epsilon_decay)
+
 
 
 
