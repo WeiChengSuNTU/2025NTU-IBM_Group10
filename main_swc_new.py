@@ -4,6 +4,7 @@ from qiskit_aer import Aer
 from qiskit.visualization import plot_histogram
 from qiskit_machine_learning.connectors import TorchConnector
 
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -14,8 +15,6 @@ from collections import deque
 
 num_episodes = 1000
 num_steps = 100
-
-epsilon = 0.999
 
 seed = 42
 env_name = "FrozenLake-v1"
@@ -62,22 +61,21 @@ def variational_layer(weights):
         qc.rz(weights[i + n_qubits], i)
 
 # ==============================================================
-def Q_value_list(iuput_state, weights, shots=shots):
-    encoding_layer(iuput_state)
-    
+def Q_value_list(input_state, weights, shots=shots):
+    encoding_layer(input_state)
+
     for _ in range(n_layers):
         qc.barrier()
         entanglement_layer()
         qc.barrier()
         variational_layer(weights)
-    
+
     qc.measure_all()
-    
+
     backend = Aer.get_backend('qasm_simulator')
     job = backend.run(transpile(qc, backend), shots=shots)
     result = job.result()
     counts = result.get_counts()
-    # plot_histogram(counts)
 
     expectation_list = []
     for qubit in range(n_qubits):
@@ -87,8 +85,8 @@ def Q_value_list(iuput_state, weights, shots=shots):
                 prob += count
         expectation = prob / shots
         expectation_list.append(expectation)
-    
-    return expectation_list
+
+    return torch.tensor(expectation_list, dtype=torch.float32)
 
 
 class VQC(nn.Module):
@@ -96,18 +94,9 @@ class VQC(nn.Module):
         super(VQC, self).__init__()
         self.n_qubits = n_qubits
         self.n_layers = n_layers
-
-    def forward(self, x, weights):
-        q_out = Q_value_list(x, weights.detach().numpy(), shots=shots)
-        return torch.tensor(q_out, dtype=torch.float32)
-
-
-class VQC(nn.Module):
-    def __init__(self, n_qubits, n_layers):
-        super(VQC, self).__init__()
-        self.n_qubits = n_qubits
-        self.n_layers = n_layers
+        self.num_weights = n_qubits * n_layers * 2
         self.weights = nn.Parameter(torch.randn(n_qubits * n_layers * 2))  # 2 parameters per qubit
+        self.sparse = False
 
     def forward(self, x):
         q_out = Q_value_list(x, self.weights.detach().numpy(), shots=1024)
@@ -125,7 +114,8 @@ class ReplayBuffer:
         Args:
             capacity (int): Maximum number of transitions to store
         """
-        self.buffer = deque(maxlen=capacity)
+        self.capacity = capacity
+        self.buffer = deque(maxlen=self.capacity)
 
     def push(self, state: int, action: int, reward: float, next_state: int, done: bool):
         """
@@ -141,6 +131,12 @@ class ReplayBuffer:
         """
         return random.sample(self.buffer, batch_size)
 
+    def length(self):
+        """
+        Returns the current number of stored transitions in the buffer
+        """
+        return len(self.buffer)
+
 
 
 def adjusted_reward(reward, done):
@@ -155,6 +151,7 @@ def adjusted_reward(reward, done):
 
 
 def deep_Q_Learning():
+    epsilon = 0.99
     buffer_capacity = 32
     buffer = ReplayBuffer(capacity=80)
     vqc = VQC(n_qubits, n_layers)  # Initialize the quantum circuit model
@@ -162,48 +159,69 @@ def deep_Q_Learning():
     optimizer = torch.optim.Adam(quantum_model_torch.parameters(), lr=0.001)  # 使用 Adam 優化器
 
     env.reset(seed=seed)
-    theta  = (torch.rand(n) - 0.5) * torch.pi #
-    theta_ = (torch.rand(n) - 0.5) * torch.pi # target net
     for episode in range(num_episodes):
-        env.reset()
+        state, info = env.reset(seed=seed)
         done = False
+
+        # 確保 state 是張量形式
+        # state = torch.tensor(state, dtype=torch.float32)  # Convert state to tensor
 
         for step in range(num_steps):
             # sample a number between 0 and 1
             sample_number = np_random.random()
             if sample_number < epsilon:
-                action = env.action_space.sample()
+                action = env.action_space.sample()  # 隨機選擇行動
             else:
-                # use quantum circuit to determine the action
-                q_values = vqc(state, theta)
-                action = int(np.argmax(q_values))
+                # 使用量子電路計算 Q 值
+                q_values = quantum_model_torch(state)  # 確保這裡計算 q_values
+                action = int(torch.argmax(q_values))  # 選擇 Q 值最大的行動
+
             next_state, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             reward = adjusted_reward(reward, done)
 
-            # store the experience in the replay buffer
+            print(state, action, reward, next_state, done)
+            time.sleep(1.5)
+
+
+            # 儲存經驗
             transition = (state, action, reward, next_state, done)
-            buffer.push(transition)
+            buffer.push(state, action, reward, next_state, done)
             state = next_state
-            if buffer.length() < buffer_capacity + 1:
-                break
-            # update the quantum circuit
-            transitions = buffer.sample(batch_size=10)
-
-            states, actions, rewards, next_states, dones = zip(*transitions)
-
-            # 計算 TD 目標（時間差分目標）
-            td_targets = reward + gemma * (1 - dones) * torch.max(q_values)
-
-            # 計算損失
-            loss = torch.nn.MSELoss(q_values.gather(1, actions.unsqueeze(1)).squeeze(), td_targets)
-
-            # 反向傳播並更新量子電路的參數
-            optimizer.zero_grad()  # 清除先前的梯度
-            loss.backward()  # 計算梯度
-            optimizer.step()  # 更新參數
 
             if done:
-                break  # 結束當前回合
-            else:
+                break
+
+            if buffer.length() < buffer_capacity + 1:
                 continue
+
+            # 更新量子電路
+            transitions = buffer.sample(batch_size=10)
+            states, actions, rewards, next_states, dones = zip(*transitions)
+
+            # 確保 dones 是 tensor 並轉為 float32
+            dones = torch.tensor(dones, dtype=torch.float32)
+
+            # 從 q_values 中選擇相應 action 的 Q 值
+            q_values_selected = torch.gather(q_values, 1, torch.tensor(actions).unsqueeze(1))
+
+            # 計算 TD 目標（時間差分目標）
+            td_targets = reward + gemma * (1 - dones) * torch.max(q_values_selected)
+
+            # 計算損失
+            loss = torch.nn.MSELoss()(q_values_selected.squeeze(), td_targets)
+
+            # 反向傳播並更新量子電路的參數
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+
+        # 更新 epsilon
+        epsilon = epsilon / (100 / episode + 1)
+
+
+
+if __name__ == "__main__":
+    deep_Q_Learning()
+    print("Training completed.")
