@@ -65,7 +65,6 @@ def Q_value_list(iuput_state, weights, shots=shots):
     for qubit in range(n_qubits):
         prob = 0
         for bitstring, count in counts.items():
-            print(f"Bitstring: {bitstring}, Count: {count}")
             if bitstring[::-1][qubit] == '1':
                 prob += count
         expectation = prob / shots
