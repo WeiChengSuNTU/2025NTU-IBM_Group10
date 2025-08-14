@@ -59,7 +59,7 @@ def Q_value_list(iuput_state, weights, shots=shots):
     job = backend.run(transpile(qc, backend), shots=shots)
     result = job.result()
     counts = result.get_counts()
-    plot_histogram(counts)
+    # plot_histogram(counts)
 
     expectation_list = []
     for qubit in range(n_qubits):
@@ -75,28 +75,27 @@ def Q_value_list(iuput_state, weights, shots=shots):
 
 
 class VQC(nn.Module):
-    def __init__(self, n_qubits, n_layers, weights):
+    def __init__(self, n_qubits, n_layers):
         super(VQC, self).__init__()
         self.n_qubits = n_qubits
         self.n_layers = n_layers
-        self.weights = weights
 
-    def forward(self, x):
-        q_out = Q_value_list(x, self.weights.detach().numpy(), shots=shots)
+    def forward(self, x, weights):
+        q_out = Q_value_list(x, weights.detach().numpy(), shots=shots)
         return torch.tensor(q_out, dtype=torch.float32)
     
 # Example usage
 weights = torch.tensor(np.random.rand(n_params), dtype=torch.float32, requires_grad=True)
-vqc = VQC(n_qubits, n_layers, weights)
+vqc = VQC(n_qubits, n_layers)
 input_state = 11 
-output = vqc(input_state)
+output = vqc(input_state, weights)
 
 print(f"Output for input state {input_state}: {output}")
 
 # Plot
 fig = qc.draw(output='mpl')
 plt.title(f"Quantum Circuit with n_layers={n_layers}")
-# plt.savefig("QC_2layer.png", dpi=300, bbox_inches='tight')
+# plt.savefig("QC_1layer.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 
