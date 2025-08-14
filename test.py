@@ -1,5 +1,4 @@
 import gymnasium as gym
-import pygame
 import time
 
 seed = 42
