@@ -53,20 +53,8 @@ def adjusted_reward(reward, done):
             return -0.01
     return reward
 
-# Compute TD target
-def compute_td_target(transitions, gamma=0.99):
-    td_targets = []
-    for state, action, reward, next_state, done in transitions:
-        next_state_tensor = decimalToBinaryFixLength(4, next_state)
-        next_action = get_action_from_quantum_circuit(next_state_tensor, env.action_space.n)
-        td_target = reward + (0 if done else gamma * next_action)
-        td_targets.append(td_target)
-    return torch.tensor(td_targets)
 
 # Compute loss
-def compute_loss(q_values, td_targets):
-    return torch.nn.functional.mse_loss(q_values, td_targets)
-
 def loss_func(q, y):
   
 
