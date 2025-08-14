@@ -3,14 +3,14 @@ import numpy as np
 
 
 #================ qc setting ==================================
-n_qubits = 4
+n_qubits = 4    # for 16 states
 qc = QuantumCircuit(n_qubits)
-weights = [0.1, 0.2, 0.3, 0.4]  
+weights = [0.1, 0.2, 0.3, 0.4] # example weights
 #================ state trans =================================
-state = 11
+state = 11      # example state (decimal)
 def dec_to_bin(state, n):
     return format(state, f'0{n}b')
-
+print(f"Check in binary: {dec_to_bin(state, n_qubits)}")
 #================ create qc ===================================
 # Encode the state into the quantum circuit
 for i in range(n_qubits):
@@ -32,7 +32,7 @@ def variational_layer(weights):
         qc.ry(weights[i], i)
         qc.rz(weights[i], i)
 
-# repeat the ansatz layer
+# repeat the variational layer and entanglement layer
 for _ in range(2):
     entanglement_layer()
     qc.barrier()
