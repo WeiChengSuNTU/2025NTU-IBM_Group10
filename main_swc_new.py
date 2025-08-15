@@ -104,9 +104,10 @@ def deep_Q_Learning():
     epsilon = 1.0
     epsilon_min = 0.01
     epsilon_decay = 0.95
-    buffer = ReplayBuffer(capacity=80)
+    buffer = ReplayBuffer(capacity=100)
     model = QuantumQValueModel()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    num_samples = 32
 
     env.reset(seed=seed)
     for episode in range(1, 501):  # 可調整訓練回合數
@@ -114,7 +115,7 @@ def deep_Q_Learning():
         done = False
         total_reward = 0
 
-        for step in range(20):
+        for step in range(100):
             state_bits = [float(b) for b in format(state, f'0{n_qubits}b')]
             state_tensor = torch.tensor(state_bits, dtype=torch.float32).unsqueeze(0)
 
@@ -143,10 +144,10 @@ def deep_Q_Learning():
 
             if done:
                 break
-            elif buffer.length() < 32:
+            elif buffer.length() < num_samples:
                 continue
 
-            transitions = buffer.sample(10)
+            transitions = buffer.sample(num_samples)
             states, actions, rewards, next_states, dones = zip(*transitions)
             state_batch = torch.tensor([[float(b) for b in format(s, f'0{n_qubits}b')] for s in states], dtype=torch.float32)
             q_values_batch = model(state_batch)
