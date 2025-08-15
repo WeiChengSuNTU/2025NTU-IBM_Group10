@@ -83,10 +83,10 @@ def manhattan_distance(state, goal=15):
 def adjusted_reward(reward, done, state, step, max_steps):
     if reward == 0:
         if done:
-            return -5.0
+            return -2.0
         else:
             dist = manhattan_distance(state)
-            return -0.01 + 0.02 * (1 - dist / 6)  # 根據距離終點給微弱正向回饋
+            return -0.05 + 0.1 * (6 - dist)  # 根據距離終點給微弱正向回饋
     else:
         return 10.0
 
@@ -103,18 +103,18 @@ def adjusted_reward(reward, done, state, step, max_steps):
 def deep_Q_Learning():
     epsilon = 1.0
     epsilon_min = 0.01
-    epsilon_decay = 0.995
+    epsilon_decay = 0.95
     buffer = ReplayBuffer(capacity=80)
     model = QuantumQValueModel()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
     env.reset(seed=seed)
-    for episode in range(1, 101):  # 可調整訓練回合數
+    for episode in range(1, 501):  # 可調整訓練回合數
         state, _ = env.reset()
         done = False
         total_reward = 0
 
-        for step in range(100):
+        for step in range(20):
             state_bits = [float(b) for b in format(state, f'0{n_qubits}b')]
             state_tensor = torch.tensor(state_bits, dtype=torch.float32).unsqueeze(0)
 
@@ -141,8 +141,10 @@ def deep_Q_Learning():
             state = next_state
             total_reward += reward
 
-            if done or buffer.length() < 32:
+            if done:
                 break
+            elif buffer.length() < 32:
+                continue
 
             transitions = buffer.sample(10)
             states, actions, rewards, next_states, dones = zip(*transitions)
@@ -159,6 +161,7 @@ def deep_Q_Learning():
             loss.backward()
             optimizer.step()
 
+        # epsilon = epsilon/(episode/100 + 1)
         epsilon = max(epsilon_min, epsilon * epsilon_decay)
         print(f"Episode {episode:03d} | Total Reward: {total_reward:.2f} | Epsilon: {epsilon:.3f}")
 
